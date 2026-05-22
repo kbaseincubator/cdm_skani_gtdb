@@ -18,7 +18,7 @@ Bound at CTS registration time to the existing GTDB-Tk R232 bundle:
 - Refdata UUID: `bb6352b4-b86f-4e3d-a858-4bc77327ab13`
 - Mounted at: `/ref_data/`
 
-Inside the unpacked R232 bundle the skani sketch directory is at `/ref_data/release232/skani/`. Pass that path to `skani search -d`.
+Inside the unpacked R232 bundle the skani sketch directory is at `/ref_data/release232/skani/database/`. Pass that path to `skani search -d`.
 
 ### Why R232 and not skani's pre-sketched R226
 
@@ -42,7 +42,7 @@ job = tscli.submit_job(
     output_mount_point="/out",
     args=[
         "search",
-        "-d", "/ref_data/release232/skani/",
+        "-d", "/ref_data/release232/skani/database/",
         "-o", "/out/hits.tsv",
         "-t", "4",
         "-n", "10",                       # top-10 nearest GTDB references per query

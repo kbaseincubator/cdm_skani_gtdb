@@ -18,9 +18,9 @@
 # release232/ directory (CTS does not strip it), and the skani sketch DB lives
 # at:
 #
-#   /ref_data/release232/skani/
+#   /ref_data/release232/skani/database/
 #
-# Demo notebooks should pass `-d /ref_data/release232/skani/` to `skani search`.
+# Demo notebooks should pass `-d /ref_data/release232/skani/database/` to `skani search`.
 # We don't bake the path into the image so a future GTDB release (R233+) only
 # needs a new refdata bundle registration, not a new image build.
 #

@@ -1,0 +1,127 @@
+# This is boilerplate for publishing a Docker image via Github Actions.
+
+name: Docker
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master", "develop" ]
+    # Publish semver tags as releases.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      # Build to local daemon first so we can smoke-test on the GH amd64
+      # runner before pushing. Local docker-on-Mac qemu emulation of x86 mis-
+      # parses skani's FASTA reader, so a real-amd64 test here is how we know
+      # the image actually works before bothering anyone to register it.
+      - name: Build (load to local daemon for testing)
+        id: build-local
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: cdm_skani_gtdb:test
+          cache-from: type=gha
+
+      - name: Smoke test on real amd64
+        run: |
+          set -euo pipefail
+          # Sanity: ENTRYPOINT + version
+          docker run --rm cdm_skani_gtdb:test --help | head -3
+          docker run --rm cdm_skani_gtdb:test -V
+
+          # End-to-end: synthesize two FASTAs, run dist, expect a sane numeric ANI line
+          mkdir -p /tmp/skani_gtdb_ci && cd /tmp/skani_gtdb_ci
+          python3 - <<'PY'
+          # Two ~5kb sequences: identical = expect 100% ANI; one mutated copy = expect ~95% ANI
+          import random
+          random.seed(0)
+          bases = "ACGT"
+          seq = "".join(random.choice(bases) for _ in range(5000))
+          with open("a.fna", "w") as f:
+              f.write(">seq_a\n" + seq + "\n")
+          # Mutate ~5% of positions for the "b" copy
+          mut = list(seq)
+          for i in random.sample(range(len(mut)), len(mut) // 20):
+              mut[i] = random.choice([b for b in bases if b != mut[i]])
+          with open("b.fna", "w") as f:
+              f.write(">seq_b\n" + "".join(mut) + "\n")
+          PY
+
+          # Self-comparison: expect 100% ANI
+          docker run --rm -v /tmp/skani_gtdb_ci:/data cdm_skani_gtdb:test \
+            dist /data/a.fna /data/a.fna -o /data/self.tsv
+          cat /tmp/skani_gtdb_ci/self.tsv
+          python3 -c "
+          import csv
+          with open('/tmp/skani_gtdb_ci/self.tsv') as f:
+              rows = list(csv.DictReader(f, delimiter='\t'))
+          assert rows, 'self-comparison returned no rows'
+          ani = float(rows[0]['ANI'])
+          assert ani == 100.0, f'self-comparison ANI={ani} (expected 100.0)'
+          print(f'self-comparison ANI = {ani} OK')
+          "
+
+          # Sketch + search workflow: prove the cdm_skani_gtdb access pattern
+          docker run --rm -v /tmp/skani_gtdb_ci:/data cdm_skani_gtdb:test \
+            sketch /data/a.fna -o /data/sketch_db
+          docker run --rm -v /tmp/skani_gtdb_ci:/data cdm_skani_gtdb:test \
+            search -d /data/sketch_db /data/a.fna -o /data/search.tsv
+          cat /tmp/skani_gtdb_ci/search.tsv
+          python3 -c "
+          import csv
+          with open('/tmp/skani_gtdb_ci/search.tsv') as f:
+              rows = list(csv.DictReader(f, delimiter='\t'))
+          assert rows, 'search returned no rows'
+          ani = float(rows[0]['ANI'])
+          assert ani == 100.0, f'search ANI={ani} (expected 100.0)'
+          print(f'search-against-sketch ANI = {ani} OK')
+          "
+
+      - name: Push to GHCR
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

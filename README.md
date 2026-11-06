@@ -34,7 +34,7 @@ The skani binary is copied out of `ecogenomic/gtdbtk:2.7.2`, which is exactly th
 
 ```python
 job = tscli.submit_job(
-    "ghcr.io/kbaseincubator/cdm_skani_gtdb:0.1.0",
+    "ghcr.io/kbaseincubator/cdm_skani_gtdb:0.1.0@sha256:682e6d44512cb8911d05459d00dd947ad7d71ebb28c380aaaae6a2a5efe856c5",
     input_genomes,                       # one or more user .fna / .fna.gz
     "cts/io/<user>/output/skani_gtdb/run1",
     cluster="kbase",
@@ -45,7 +45,7 @@ job = tscli.submit_job(
         "-d", "/ref_data/release232/skani/database/",
         "-o", "/out/hits.tsv",
         "-t", "4",
-        "-n", "10",                       # top-10 nearest GTDB references per query
+        "-n", "10",                       # at most 10 references per query (a cap, see below)
         "--short-header",
         tscli.insert_files(),
     ],
@@ -54,7 +54,9 @@ job = tscli.submit_job(
 )
 ```
 
-Memory: per the skani docs, querying ~140k GTDB representatives takes "seconds with a single processor and ~6 GB of RAM" - the 32 GB budget here is comfort margin.
+Memory: request 32 GB. A test with 2 small query genomes peaked at 15.5 GB, well above the ~6 GB quoted in the skani docs for its own pre-sketched DB; 16 GB is not safe.
+
+`-n N` is an upper limit, not a guaranteed top-N: only references that pass skani's ANI screen (about 80%) and alignment-fraction filters are reported, so most queries get far fewer than N rows. A query with no close GTDB reference (e.g. a novel genome) produces **no row at all**, so compare the distinct `Query_file` values in `hits.tsv` against your inputs to see which queries had no hit.
 
 ### Output columns
 
